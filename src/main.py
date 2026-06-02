@@ -116,7 +116,33 @@ def download(session):
     logging.info(f'Архив был загружен и сохранён: {archive_path}')
 
 
-def pep_info(session):
+def check_status_mismatch(inform, type_on_page, status_on_page, link, diff):
+    """Поиск несоответствий статусов"""
+    page_inform = type_on_page + status_on_page
+
+    if len(inform) == 1:
+        if inform != type_on_page:
+            diff.append((inform, page_inform, link))
+    elif len(inform) == 2:
+        if inform != page_inform:
+            diff.append((inform, page_inform, link))
+
+
+def find_status_type(dt_all):
+    """Посик на страницах каждого статуса и типа"""
+    type_on_page = "?"
+    status_on_page = "?"
+    for dt in dt_all:
+        if dt.text == 'Type:':
+            type_on_page = dt.find_next_sibling('dd')
+            type_on_page = find_tag(type_on_page, 'abbr').text[0]
+        elif dt.text == 'Status:':
+            status_on_page = dt.find_next_sibling('dd')
+            status_on_page = find_tag(status_on_page, 'abbr').text[0]
+    return type_on_page, status_on_page
+
+
+def pep(session):
     response = get_response(session, PEP_URL)
     if response is None:
         return
@@ -146,29 +172,16 @@ def pep_info(session):
             soup = BeautifulSoup(response.text, features='lxml')
 
             dt_all = soup.find_all('dt')
-            type_on_page = "?"
-            status_on_page = "?"
-            for dt in dt_all:
-                if dt.text == 'Type:':
-                    type_on_page = dt.find_next_sibling('dd')
-                    type_on_page = find_tag(type_on_page, 'abbr').text[0]
-                elif dt.text == 'Status:':
-                    status_on_page = dt.find_next_sibling('dd')
-                    status_on_page = find_tag(status_on_page, 'abbr').text[0]
+            type_on_page, status_on_page = find_status_type(dt_all)
 
-            page_inform = type_on_page + status_on_page
+            check_status_mismatch(inform, type_on_page,
+                                  status_on_page, link, diff)
 
             if status_on_page in status_count:
                 status_count[status_on_page] += 1
             else:
                 status_count[status_on_page] = 1
 
-            if len(inform) == 1:
-                if inform != type_on_page:
-                    diff.append((inform, page_inform, link))
-            elif len(inform) == 2:
-                if inform != page_inform:
-                    diff.append((inform, page_inform, link))
     peps = 0
     for status in status_count.keys():
         results.append((status, status_count[status]))
@@ -188,7 +201,7 @@ MODE_TO_FUNCTION = {
     'whats-new': whats_new,
     'latest-versions': latest_versions,
     'download': download,
-    'pep': pep_info,
+    'pep': pep,
 }
 
 
