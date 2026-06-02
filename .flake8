@@ -1,4 +1,5 @@
 [flake8]
+ignore = C901
 max-line-length = 79
 disable-noqa = True
 paths =
