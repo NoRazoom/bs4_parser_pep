@@ -6,7 +6,7 @@ import requests_cache
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-from constants import BASE_DIR, MAIN_DOC_URL, PEP_URL
+from constants import BASE_DIR, MAIN_DOC_URL, PEP_URL, EXPECTED_STATUS
 from configs import configure_argument_parser, configure_logging
 from outputs import control_output
 from utils import get_response, find_tag
@@ -183,7 +183,7 @@ def pep(session):
 
     peps = 0
     for status in status_count.keys():
-        results.append((status, status_count[status]))
+        results.append((EXPECTED_STATUS[status], status_count[status]))
         peps += status_count[status]
     results.append(('Total', peps))
 
