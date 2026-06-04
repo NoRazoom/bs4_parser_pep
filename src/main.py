@@ -113,32 +113,6 @@ def download(session):
     logging.info(f'Архив был загружен и сохранён: {archive_path}')
 
 
-def check_status_mismatch(inform, type_on_page, status_on_page, link, diff):
-    """Поиск несоответствий статусов"""
-    page_inform = type_on_page + status_on_page
-
-    if len(inform) == 1:
-        if inform != type_on_page:
-            diff.append((inform, page_inform, link))
-    elif len(inform) == 2:
-        if inform != page_inform:
-            diff.append((inform, page_inform, link))
-
-
-def find_status_type(dt_all):
-    """Посик на страницах каждого статуса и типа"""
-    type_on_page = "?"
-    status_on_page = "?"
-    for dt in dt_all:
-        if dt.text == 'Type:':
-            type_on_page = dt.find_next_sibling('dd')
-            type_on_page = find_tag(type_on_page, 'abbr').text[0]
-        elif dt.text == 'Status:':
-            status_on_page = dt.find_next_sibling('dd')
-            status_on_page = find_tag(status_on_page, 'abbr').text[0]
-    return type_on_page, status_on_page
-
-
 def pep(session):
     response = get_response(session, PEP_URL)
     if response is None:
@@ -149,40 +123,38 @@ def pep(session):
     diff = []
     results = [('Статус', 'Количество')]
     status_count = defaultdict(int)
-    for line in tqdm(lines):
-        short_link = find_tag(line,
-                              'a',
-                              {'class': 'pep reference internal'})['href']
-        link = urljoin(PEP_URL, short_link)
-        abbr_tag = find_tag('abbr')
-        if abbr_tag is None:
-            continue
-        inform = abbr_tag.text
+    for link in tqdm(lines):
+        parent_td = link.find_parent('td')  # второй тд
+        parent_tr = parent_td.find_parent('tr') if parent_td else None
+        status_td = parent_tr.find('td') if parent_tr else None  # первый тд
+        preview_status = ""
+        if status_td:
+            preview_status = status_td.text[1:]
+        expected_statuses = EXPECTED_STATUS[preview_status]
+        pep_link = urljoin(PEP_URL, link['href'])
+        pep_response = get_response(session, pep_link)
+        soup = BeautifulSoup(pep_response.text, features='lxml')
+        section = find_tag(soup, 'section', {'id': 'pep-content'})
+        table = find_tag(section, 'dl', {'class': 'field-list'})
 
-        response = get_response(session, link)
-        if response is None:
-            return
-        soup = BeautifulSoup(response.text, features='lxml')
+        status_row = table.find(string='Status').parent
+        status_tag = status_row.find_next_sibling('dd')
+        status = status_tag.string
+        if status not in expected_statuses:
+            diff.append(
+                f'{pep_link}\nСтатус в карточке: {status}\n'
+                f'Ожидаемые статусы: {expected_statuses}'
+            )
 
-        dt_all = soup.find_all('dt')
-        type_on_page, status_on_page = find_status_type(dt_all)
+        status_count[EXPECTED_STATUS[preview_status]] += 1
 
-        check_status_mismatch(inform, type_on_page,
-                              status_on_page, link, diff)
-
-        status_count[status_on_page] += 1
-
-    results.extend(
-        (EXPECTED_STATUS[status], count
-         ) for status, count in status_count.items())
+    results.extend(status_count.items())
     peps = sum(status_count.values())
     results.append(('Total', peps))
 
     logging.info('Несовпадающие статусы:')
-    for inf, page_inf, link in diff:
-        logging.info(link)
-        logging.info(f'Статус в карточке: {page_inf}')
-        logging.info(f'Ожидаемые статусы: {inf}')
+    for message in diff:
+        logging.info(message)
 
     return results
 
