@@ -1,6 +1,7 @@
 from urllib.parse import urljoin
 import re
 import logging
+from collections import defaultdict
 
 import requests_cache
 from bs4 import BeautifulSoup
@@ -14,16 +15,12 @@ from utils import get_response, find_tag
 
 def whats_new(session):
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
-    '''response = session.get(whats_new_url)
-    response.encoding = 'utf-8'''
 
     response = get_response(session, whats_new_url)
     if response is None:
         return
 
     soup = BeautifulSoup(response.text, features='lxml')
-
-    # main_div = soup.find('section', attrs={'id': 'what-s-new-in-python'})
     main_div = find_tag(soup, 'section', attrs={'id': 'what-s-new-in-python'})
 
     div_with_ul = find_tag(main_div, 'div', attrs={'class': 'toctree-wrapper'})
@@ -40,15 +37,14 @@ def whats_new(session):
         if response is None:
             continue
         soup = BeautifulSoup(response.text, features='lxml')
-        h1 = find_tag(soup, 'h1')  # Найдите в "супе" тег h1.
-        dl = find_tag(soup, 'dl')  # Найдите в "супе" тег dl.
+        h1 = find_tag(soup, 'h1')
+        dl = find_tag(soup, 'dl')
         dl_text = dl.text.replace('\n', ' ')
         results.append((version_link, h1.text, dl_text))
     return results
 
 
 def latest_versions(session):
-    # session = requests_cache.CachedSession()
     response = get_response(session, MAIN_DOC_URL)
     if response is None:
         return
@@ -108,7 +104,9 @@ def download(session):
     downloads_dir.mkdir(exist_ok=True)
     archive_path = downloads_dir / filename
 
-    response = session.get(archive_url)
+    response = get_response(session, archive_url)
+    if response is None:
+        return
 
     with open(archive_path, 'wb') as file:
         file.write(response.content)
@@ -147,44 +145,37 @@ def pep(session):
         return
 
     soup = BeautifulSoup(response.text, features='lxml')
-    tables = soup.find_all('table', attrs={
-        'class': 'pep-zero-table docutils align-default'})
+    lines = soup.find_all('a', attrs={'class': 'pep reference internal'})
     diff = []
     results = [('Статус', 'Количество')]
-    status_count = {}
-    for table in tqdm(tables):
-        table_body = find_tag(table, 'tbody')
-        lines = table_body.find_all('tr')
-        for line in lines:
-            short_link = find_tag(line,
-                                  'a',
-                                  {'class': 'pep reference internal'})['href']
-            link = urljoin(PEP_URL, short_link)
-            abbr_tag = line.find('abbr')
-            if abbr_tag is None:
-                continue
-            inform = abbr_tag.text
+    status_count = defaultdict(int)
+    for line in tqdm(lines):
+        short_link = find_tag(line,
+                              'a',
+                              {'class': 'pep reference internal'})['href']
+        link = urljoin(PEP_URL, short_link)
+        abbr_tag = find_tag('abbr')
+        if abbr_tag is None:
+            continue
+        inform = abbr_tag.text
 
-            response = get_response(session, link)
-            if response is None:
-                return
-            soup = BeautifulSoup(response.text, features='lxml')
+        response = get_response(session, link)
+        if response is None:
+            return
+        soup = BeautifulSoup(response.text, features='lxml')
 
-            dt_all = soup.find_all('dt')
-            type_on_page, status_on_page = find_status_type(dt_all)
+        dt_all = soup.find_all('dt')
+        type_on_page, status_on_page = find_status_type(dt_all)
 
-            check_status_mismatch(inform, type_on_page,
-                                  status_on_page, link, diff)
+        check_status_mismatch(inform, type_on_page,
+                              status_on_page, link, diff)
 
-            if status_on_page in status_count:
-                status_count[status_on_page] += 1
-            else:
-                status_count[status_on_page] = 1
+        status_count[status_on_page] += 1
 
-    peps = 0
-    for status in status_count.keys():
-        results.append((EXPECTED_STATUS[status], status_count[status]))
-        peps += status_count[status]
+    results.extend(
+        (EXPECTED_STATUS[status], count
+         ) for status, count in status_count.items())
+    peps = sum(status_count.values())
     results.append(('Total', peps))
 
     logging.info('Несовпадающие статусы:')
